@@ -21,7 +21,7 @@ setup() {
 	if [ ! -f _${PKG_UTIL} ]; then
 	    wget -O _${PKG_UTIL} https://raw.githubusercontent.com/SynologyOpenSource/pkgscripts-ng/master/include/${PKG_UTIL}
 	fi
-	source _${PKG_UTIL}
+	source $PWD/_${PKG_UTIL}
 
 	# download virtualenv distribution to be included in our installation package
 	if [ ! -f _${VIRTUALENV} ]; then
