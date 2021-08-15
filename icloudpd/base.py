@@ -14,6 +14,8 @@ import click
 from tqdm import tqdm
 from tzlocal import get_localzone
 
+from pyicloud_ipd.exceptions import PyiCloudAPIResponseError
+
 from icloudpd.logger import setup_logger
 from icloudpd.authentication import authenticate, TwoStepAuthRequiredError
 from icloudpd import download
@@ -24,6 +26,7 @@ from icloudpd.paths import local_download_path
 from icloudpd import exif_datetime
 # Must import the constants object so that we can mock values in tests.
 from icloudpd import constants
+from icloudpd.counter import Counter
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
@@ -119,13 +122,15 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 )
 @click.option(
     "--folder-structure",
-    help="Folder structure (default: {:%Y/%m/%d})",
+    help="Folder structure (default: {:%Y/%m/%d}). "
+    "If set to 'none' all photos will just be placed into the download directory",
     metavar="<folder_structure>",
     default="{:%Y/%m/%d}",
 )
 @click.option(
     "--set-exif-datetime",
-    help="Write the DateTimeOriginal exif tag from file creation date, if it doesn't exist.",
+    help="Write the DateTimeOriginal exif tag from file creation date, " +
+    "if it doesn't exist.",
     is_flag=True,
 )
 @click.option(
@@ -177,11 +182,16 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
     type=click.Choice(["debug", "info", "error"]),
     default="debug",
 )
+@click.option("--no-progress-bar",
+              help="Disables the one-line progress bar and prints log messages on separate lines "
+              "(Progress bar is disabled by default if there is no tty attached)",
+              is_flag=True,
+              )
 @click.option(
-    "--no-progress-bar",
-    help="Disables the one-line progress bar and prints log messages on separate lines "
-    "(Progress bar is disabled by default if there is no tty attached)",
-    is_flag=True,
+    "--threads-num",
+    help="Number of cpu threads -- deprecated. To be removed in future version",
+    type=click.IntRange(1),
+    default=1,
 )
 @click.version_option()
 # pylint: disable-msg=too-many-arguments,too-many-statements
@@ -213,8 +223,10 @@ def main(
         log_level,
         no_progress_bar,
         notification_script,
+        threads_num,    # pylint: disable=W0613
 ):
     """Download all iCloud photos to a local directory"""
+
     logger = setup_logger()
     if only_print_filenames:
         logger.disabled = True
@@ -228,6 +240,11 @@ def main(
             logger.setLevel(logging.INFO)
         elif log_level == "error":
             logger.setLevel(logging.ERROR)
+
+    # check required directory param only if not list albums
+    if not list_albums and not directory:
+        print('--directory or --list-albums are required')
+        sys.exit(2)
 
     raise_error_on_2sa = (
         smtp_username is not None
@@ -254,26 +271,27 @@ def main(
                 smtp_no_tls,
                 notification_email,
             )
-        exit(1)
+        sys.exit(1)
 
     # Default album is "All Photos", so this is the same as
     # calling `icloud.photos.all`.
-    photos = icloud.photos.albums[album]
+    # After 6 or 7 runs within 1h Apple blocks the API for some time. In that
+    # case exit.
+    try:
+        photos = icloud.photos.albums[album]
+    except PyiCloudAPIResponseError as err:
+        # For later: come up with a nicer message to the user. For now take the
+        # exception text
+        print(err)
+        sys.exit(1)
 
     if list_albums:
         albums_dict = icloud.photos.albums
-        # Python2: itervalues, Python3: values()
-        if sys.version_info[0] >= 3:
-            albums = albums_dict.values()  # pragma: no cover
-        else:
-            albums = albums_dict.itervalues()  # pragma: no cover
+        albums = albums_dict.values()  # pragma: no cover
         album_titles = [str(a) for a in albums]
         print(*album_titles, sep="\n")
-        exit(0)
+        sys.exit(0)
 
-    # For Python 2.7
-    if hasattr(directory, "decode"):
-        directory = directory.decode("utf-8")  # pragma: no cover
     directory = os.path.normpath(directory)
 
     logger.debug(
@@ -296,7 +314,7 @@ def main(
                 # If the first reauthentication attempt failed,
                 # start waiting a few seconds before retrying in case
                 # there are some issues with the Apple servers
-                time.sleep(constants.WAIT_SECONDS)
+                time.sleep(constants.WAIT_SECONDS * retries)
             icloud.authenticate()
 
     photos.exception_handler = photos_exception_handler
@@ -322,15 +340,13 @@ def main(
     if not skip_videos:
         video_suffix = " or video" if photos_count == 1 else " and videos"
     logger.info(
-        "Downloading %s %s photo%s%s to %s/ ...",
+        "Downloading %s %s photo%s%s to %s ...",
         photos_count_str,
         size,
         plural_suffix,
         video_suffix,
         directory,
     )
-
-    consecutive_files_found = 0
 
     # Use only ASCII characters in progress bar
     tqdm_kwargs["ascii"] = True
@@ -347,160 +363,180 @@ def main(
         photos_enumerator = tqdm(photos, **tqdm_kwargs)
         logger.set_tqdm(photos_enumerator)
 
-    # pylint: disable-msg=too-many-nested-blocks
-    for photo in photos_enumerator:
-        for _ in range(constants.MAX_RETRIES):
-            if skip_videos and photo.item_type != "image":
-                logger.set_tqdm_description(
-                    "Skipping %s, only downloading photos." % photo.filename
-                )
-                break
-            if photo.item_type != "image" and photo.item_type != "movie":
-                logger.set_tqdm_description(
-                    "Skipping %s, only downloading photos and videos. "
-                    "(Item type was: %s)" % (photo.filename, photo.item_type)
-                )
-                break
-            try:
-                created_date = photo.created.astimezone(get_localzone())
-            except (ValueError, OSError):
-                logger.set_tqdm_description(
-                    "Could not convert photo created date to local timezone (%s)" %
-                    photo.created, logging.ERROR)
-                created_date = photo.created
+    def download_photo(counter, photo):
+        """internal function for actually downloading the photos"""
+        if skip_videos and photo.item_type != "image":
+            logger.set_tqdm_description(
+                "Skipping %s, only downloading photos." % photo.filename
+            )
+            return
+        if photo.item_type != "image" and photo.item_type != "movie":
+            logger.set_tqdm_description(
+                "Skipping %s, only downloading photos and videos. "
+                "(Item type was: %s)" % (photo.filename, photo.item_type)
+            )
+            return
+        try:
+            created_date = photo.created.astimezone(get_localzone())
+        except (ValueError, OSError):
+            logger.set_tqdm_description(
+                "Could not convert photo created date to local timezone (%s)" %
+                photo.created, logging.ERROR)
+            created_date = photo.created
 
-            try:
+        try:
+            if folder_structure.lower() == "none":
+                date_path = ""
+            else:
                 date_path = folder_structure.format(created_date)
-            except ValueError:  # pragma: no cover
-                # This error only seems to happen in Python 2
+        except ValueError:  # pragma: no cover
+            # This error only seems to happen in Python 2
+            logger.set_tqdm_description(
+                "Photo created date was not valid (%s)" %
+                photo.created, logging.ERROR)
+            # e.g. ValueError: year=5 is before 1900
+            # (https://github.com/icloud-photos-downloader/icloud_photos_downloader/issues/122)
+            # Just use the Unix epoch
+            created_date = datetime.datetime.fromtimestamp(0)
+            date_path = folder_structure.format(created_date)
+
+        download_dir = os.path.normpath(os.path.join(directory, date_path))
+        download_size = size
+
+        try:
+            versions = photo.versions
+        except KeyError as ex:
+            print(
+                "KeyError: %s attribute was not found in the photo fields!" %
+                ex)
+            with open('icloudpd-photo-error.json', 'w') as outfile:
+                # pylint: disable=protected-access
+                json.dump({
+                    "master_record": photo._master_record,
+                    "asset_record": photo._asset_record
+                }, outfile)
+                # pylint: enable=protected-access
+            print("icloudpd has saved the photo record to: "
+                  "./icloudpd-photo-error.json")
+            print("Please create a Gist with the contents of this file: "
+                  "https://gist.github.com")
+            print(
+                "Then create an issue on GitHub: "
+                "https://github.com/icloud-photos-downloader/icloud_photos_downloader/issues")
+            print(
+                "Include a link to the Gist in your issue, so that we can "
+                "see what went wrong.\n")
+            return
+
+        if size not in versions and size != "original":
+            if force_size:
+                filename = photo.filename.encode(
+                    "utf-8").decode("ascii", "ignore")
                 logger.set_tqdm_description(
-                    "Photo created date was not valid (%s)" %
-                    photo.created, logging.ERROR)
-                # e.g. ValueError: year=5 is before 1900
-                # (https://github.com/ndbroadbent/icloud_photos_downloader/issues/122)
-                # Just use the Unix epoch
-                created_date = datetime.datetime.fromtimestamp(0)
-                date_path = folder_structure.format(created_date)
+                    "%s size does not exist for %s. Skipping..." %
+                    (size, filename), logging.ERROR, )
+                return
+            download_size = "original"
 
-            download_dir = os.path.join(directory, date_path)
+        download_path = local_download_path(
+            photo, download_size, download_dir)
 
-            if not os.path.exists(download_dir):
-                os.makedirs(download_dir)
+        file_exists = os.path.isfile(download_path)
+        if not file_exists and download_size == "original":
+            # Deprecation - We used to download files like IMG_1234-original.jpg,
+            # so we need to check for these.
+            # Now we match the behavior of iCloud for Windows: IMG_1234.jpg
+            original_download_path = ("-%s." % size).join(
+                download_path.rsplit(".", 1)
+            )
+            file_exists = os.path.isfile(original_download_path)
 
-            download_size = size
-
-            try:
-                versions = photo.versions
-            except KeyError as ex:
-                print(
-                    "KeyError: %s attribute was not found in the photo fields!" %
-                    ex)
-                with open('icloudpd-photo-error.json', 'w') as outfile:
-                    # pylint: disable=protected-access
-                    json.dump({
-                        "master_record": photo._master_record,
-                        "asset_record": photo._asset_record
-                    }, outfile)
-                    # pylint: enable=protected-access
-                print("icloudpd has saved the photo record to: "
-                      "./icloudpd-photo-error.json")
-                print("Please create a Gist with the contents of this file: "
-                      "https://gist.github.com")
-                print(
-                    "Then create an issue on GitHub: "
-                    "https://github.com/ndbroadbent/icloud_photos_downloader/issues")
-                print(
-                    "Include a link to the Gist in your issue, so that we can "
-                    "see what went wrong.\n")
-                break
-
-            if size not in versions and size != "original":
-                if force_size:
-                    filename = photo.filename.encode(
-                        "utf-8").decode("ascii", "ignore")
-                    logger.set_tqdm_description(
-                        "%s size does not exist for %s. Skipping..." %
-                        (size, filename), logging.ERROR, )
-                    break
-                download_size = "original"
-
-            download_path = local_download_path(
-                photo, download_size, download_dir)
-
-            file_exists = os.path.isfile(download_path)
-            if not file_exists and download_size == "original":
-                # Deprecation - We used to download files like IMG_1234-original.jpg,
-                # so we need to check for these.
-                # Now we match the behavior of iCloud for Windows: IMG_1234.jpg
-                original_download_path = ("-%s." % size).join(
+        if file_exists:
+            # for later: this crashes if download-size medium is specified
+            file_size = os.stat(download_path).st_size
+            version = photo.versions[download_size]
+            photo_size = version["size"]
+            if file_size != photo_size:
+                download_path = ("-%s." % photo_size).join(
                     download_path.rsplit(".", 1)
                 )
-                file_exists = os.path.isfile(original_download_path)
-
+                logger.set_tqdm_description(
+                    "%s deduplicated." % truncate_middle(download_path, 96)
+                )
+                file_exists = os.path.isfile(download_path)
             if file_exists:
-                if until_found is not None:
-                    consecutive_files_found += 1
+                counter.increment()
                 logger.set_tqdm_description(
                     "%s already exists." % truncate_middle(download_path, 96)
                 )
+
+        if not file_exists:
+            counter.reset()
+            if only_print_filenames:
+                print(download_path)
             else:
-                if until_found is not None:
-                    consecutive_files_found = 0
+                truncated_path = truncate_middle(download_path, 96)
+                logger.set_tqdm_description(
+                    "Downloading %s" %
+                    truncated_path)
 
-                if only_print_filenames:
-                    print(download_path)
+                download_result = download.download_media(
+                    icloud, photo, download_path, download_size
+                )
+
+                if download_result:
+                    if set_exif_datetime and photo.filename.lower().endswith(
+                            (".jpg", ".jpeg")) and not exif_datetime.get_photo_exif(download_path):
+                        # %Y:%m:%d looks wrong but it's the correct format
+                        date_str = created_date.strftime(
+                            "%Y-%m-%d %H:%M:%S%z")
+                        logger.debug(
+                            "Setting EXIF timestamp for %s: %s",
+                            download_path,
+                            date_str,
+                        )
+                        exif_datetime.set_photo_exif(
+                            download_path,
+                            created_date.strftime("%Y:%m:%d %H:%M:%S"),
+                        )
+                    download.set_utime(download_path, created_date)
+
+        # Also download the live photo if present
+        if not skip_live_photos:
+            lp_size = live_photo_size + "Video"
+            if lp_size in photo.versions:
+                version = photo.versions[lp_size]
+                filename = version["filename"]
+                if live_photo_size != "original":
+                    # Add size to filename if not original
+                    filename = filename.replace(
+                        ".MOV", "-%s.MOV" %
+                        live_photo_size)
+                lp_download_path = os.path.join(download_dir, filename)
+
+                lp_file_exists = os.path.isfile(lp_download_path)
+
+                if only_print_filenames and not lp_file_exists:
+                    print(lp_download_path)
                 else:
-                    truncated_path = truncate_middle(download_path, 96)
-                    logger.set_tqdm_description(
-                        "Downloading %s" %
-                        truncated_path)
-
-                    download_result = download.download_media(
-                        icloud, photo, download_path, download_size
-                    )
-
-                    if download_result and set_exif_datetime:
-                        if photo.filename.lower().endswith((".jpg", ".jpeg")):
-                            if not exif_datetime.get_photo_exif(download_path):
-                                # %Y:%m:%d looks wrong but it's the correct format
-                                date_str = created_date.strftime(
-                                    "%Y:%m:%d %H:%M:%S")
-                                logger.debug(
-                                    "Setting EXIF timestamp for %s: %s",
-                                    download_path,
-                                    date_str,
-                                )
-                                exif_datetime.set_photo_exif(
-                                    download_path,
-                                    created_date.strftime("%Y:%m:%d %H:%M:%S"),
-                                )
-                        else:
-                            timestamp = time.mktime(created_date.timetuple())
-                            os.utime(download_path, (timestamp, timestamp))
-
-            # Also download the live photo if present
-            if not skip_live_photos:
-                lp_size = live_photo_size + "Video"
-                if lp_size in photo.versions:
-                    version = photo.versions[lp_size]
-                    filename = version["filename"]
-                    if live_photo_size != "original":
-                        # Add size to filename if not original
-                        filename = filename.replace(
-                            ".MOV", "-%s.MOV" %
-                            live_photo_size)
-                    lp_download_path = os.path.join(download_dir, filename)
-
-                    if only_print_filenames:
-                        print(lp_download_path)
-                    else:
-                        if os.path.isfile(lp_download_path):
+                    if lp_file_exists:
+                        lp_file_size = os.stat(lp_download_path).st_size
+                        lp_photo_size = version["size"]
+                        if lp_file_size != lp_photo_size:
+                            lp_download_path = ("-%s." % lp_photo_size).join(
+                                lp_download_path.rsplit(".", 1)
+                            )
+                            logger.set_tqdm_description(
+                                "%s deduplicated." %
+                                truncate_middle(
+                                    lp_download_path, 96))
+                            lp_file_exists = os.path.isfile(lp_download_path)
+                        if lp_file_exists:
                             logger.set_tqdm_description(
                                 "%s already exists."
                                 % truncate_middle(lp_download_path, 96)
                             )
-                            break
-
+                    if not lp_file_exists:
                         truncated_path = truncate_middle(lp_download_path, 96)
                         logger.set_tqdm_description(
                             "Downloading %s" % truncated_path)
@@ -508,19 +544,27 @@ def main(
                             icloud, photo, lp_download_path, lp_size
                         )
 
-            break
+    consecutive_files_found = Counter(0)
 
-        if until_found is not None and consecutive_files_found >= until_found:
-            logger.tqdm_write(
-                "Found %d consecutive previously downloaded photos. Exiting"
-                % until_found
-            )
-            if hasattr(photos_enumerator, "close"):
-                photos_enumerator.close()
+    def should_break(counter):
+        """Exit if until_found condition is reached"""
+        return until_found is not None and counter.value() >= until_found
+
+    photos_iterator = iter(photos_enumerator)
+    while True:
+        try:
+            if should_break(consecutive_files_found):
+                logger.tqdm_write(
+                    "Found %d consecutive previously downloaded photos. Exiting" %
+                    until_found)
+                break
+            item = next(photos_iterator)
+            download_photo(consecutive_files_found, item)
+        except StopIteration:
             break
 
     if only_print_filenames:
-        exit(0)
+        sys.exit(0)
 
     logger.info("All photos have been downloaded!")
 

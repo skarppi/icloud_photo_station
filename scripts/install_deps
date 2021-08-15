@@ -1,3 +1,4 @@
-#!/bin/sh
-set -e
-pip3 install -r requirements.txt
+#!/bin/bash
+set -euo pipefail
+pip3 install -r requirements-pip.txt
+pip3 install -r requirements.txt -r requirements-test.txt -r requirements-dev.txt

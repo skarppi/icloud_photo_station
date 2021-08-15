@@ -1,3 +1,6 @@
 #!/bin/bash
-set -e
-python setup.py bdist_wheel --universal
+set -euo pipefail
+
+mkdir -p dist
+rm -f dist/*
+python3 setup.py bdist_wheel --universal

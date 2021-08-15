@@ -1,13 +1,22 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-ICLOUDPD_VERSION="$(cat setup.py | grep version= | cut -d'"' -f 2)"
+# realpath not availabe on Mac by default...
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
+CURRENT_DIR=$(dirname "$0")
+ROOT_DIR="$(realpath $(dirname "$0")/..)"
+
+ICLOUDPD_VERSION="$(cat "$ROOT_DIR/setup.py" | grep version= | cut -d'"' -f 2)"
 echo "Current icloudpd version: ${ICLOUDPD_VERSION}"
 
-cd docker
 docker build \
-  --build-arg "ICLOUDPD_VERSION=${ICLOUDPD_VERSION}" \
-  -t ndbroadbent/icloudpd \
-  .
+  -t "icloudpd/icloudpd:${ICLOUDPD_VERSION}" \
+  -f "Dockerfile.release" \
+  --build-arg ICLOUDPD_VERSION=${ICLOUDPD_VERSION} \
+  "$ROOT_DIR"
 
-docker push ndbroadbent/icloudpd
+docker tag "icloudpd/icloudpd:${ICLOUDPD_VERSION}" "icloudpd/icloudpd:${ICLOUDPD_VERSION}-alpine"
+docker tag "icloudpd/icloudpd:${ICLOUDPD_VERSION}" "icloudpd/icloudpd:latest"
