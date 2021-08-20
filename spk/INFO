@@ -1,11 +1,11 @@
 package="icloud_photo_station"
-version="0.2.0"
+version="0.3.0"
 description="Synchronize iCloud Photos to DSM"
 
 maintainer="Juho Kolehmainen"
 arch="noarch"
 displayname="iCloud Photo Station"
-firmware="6.1-7321"
+os_min_ver="7.0-40000"
 support_url="https://github.com/skarppi/icloud_photo_station"
 
 ctl_stop="no"

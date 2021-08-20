@@ -1,0 +1,5 @@
+{
+    "usr-local-linker": {
+        "bin": ["usr/local/bin/icloud_photo_station"]
+    }
+}

@@ -19,7 +19,7 @@ setup() {
 
 	# download a helper script for creating Synology packages
 	if [ ! -f _${PKG_UTIL} ]; then
-	    wget -O _${PKG_UTIL} https://raw.githubusercontent.com/SynologyOpenSource/pkgscripts-ng/master/include/${PKG_UTIL}
+	    wget -O _${PKG_UTIL} https://raw.githubusercontent.com/SynologyOpenSource/pkgscripts-ng/DSM7.0/include/${PKG_UTIL}
 	fi
 	source $PWD/_${PKG_UTIL}
 
@@ -35,7 +35,10 @@ setup() {
 create_package_tgz() {
 	# Install virtual env and all libraries
 	tar xvfz _${VIRTUALENV} -C $TGZ_DIR
-	pip wheel --wheel-dir=${TGZ_DIR}/wheelhouse -r ../requirements.txt
+	pip3 wheel --wheel-dir=${TGZ_DIR}/wheelhouse -r ../requirements.txt
+
+	# Platform specific libraries
+	python3 -m pip download --dest=${TGZ_DIR}/wheelhouse/ -r ../requirements-manylinux.txt --platform=manylinux1_x86_64 --implementation cp --python-version 3.8 --only-binary=:all:
 
 	# Copy python app
 	mkdir -p ${TGZ_DIR}/app
@@ -49,9 +52,13 @@ create_package_tgz() {
 }
 
 create_spk() {
+	local conf_dir=$PKG_DIR/conf
 	local scripts_dir=$PKG_DIR/scripts
 
-	### Copy package center scripts to PKG_DIR
+	### Copy package center conf/scripts to PKG_DIR
+	mkdir -p $conf_dir
+	cp -av conf/* $conf_dir
+
 	mkdir -p $scripts_dir
 	cp -av scripts/* $scripts_dir
 
