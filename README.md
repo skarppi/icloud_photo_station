@@ -6,19 +6,27 @@
 
 ### Installation to Synology DSM
 
+Ready made packages are available:
+
+- For DSM 6.x [icloud_photo_station-0.2.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/0.2.0/icloud_photo_station-0.2.0.spk)
+
+- For DSM 7.x [icloud_photo_station-0.3.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/0.3.0/icloud_photo_station-0.3.0.spk)
+
+- Or follow instructions below how to package SPK yourself from code. Use ```dsm6``` branch for DSM 6.x.
+
+```
     # Clone the repo somewhere
     git clone https://github.com/skarppi/icloud_photo_station.git
     cd icloud_photo_station
 
-> If you need to install Python, see the [Requirements](#requirements) section for instructions.
-
     # Create a SPK installation package containing virtualenv, python scripts and all necessary dependencies.
-
     cd spk
     sh build.sh
+```
 
-Manually install resulting [icloud_photo_station-0.2.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/0.2.0/icloud_photo_station-0.2.0.spk) in your DSM `Package Station`. Now you can set up `User-defined script` into `Task Scheduler` and set up scheduling and notification emails for script output.
+Manually install the spk in your DSM `Package Station`. After installation is complete you can set up `User-defined script` into `Task Scheduler` and set up scheduling. Notification emails for script output are handy to get notified when two-factor authentication has expired.
 
+```
     source /volume1/@appstore/icloud_photo_station/env/bin/activate
     python /volume1/@appstore/icloud_photo_station/app/icloudpd.py \
         --username '<YOUR ICLOUD USERNAME>' \
@@ -26,8 +34,9 @@ Manually install resulting [icloud_photo_station-0.2.0.spk](https://github.com/s
         --auto-delete \
         --until-found 10 \
         --download output
+```
 
-If your iCloud account has two-factor authentication enabled, SSH to Synology box and run the script manually first time in order to input the verification code.
+If your iCloud account has two-factor authentication enabled, SSH to Synology box and run the script manually first time in order to input the verification code. This step needs to be repeated every once in a while when the authentication expires.
 
 ## Usage
 
@@ -119,8 +128,8 @@ icloudpd --directory ./Photos \
 
 ## Requirements
 
-- Python 3.6+
-- pip
+- Python 3.8+
+- pip3
 
 ### Install Python & pip
 
