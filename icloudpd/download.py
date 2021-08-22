@@ -25,22 +25,36 @@ def update_mtime(photo, download_path):
             # when generating the download directory.
             # So just return silently without touching the mtime.
             return
-        ctime = time.mktime(created_date.timetuple())
-        os.utime(download_path, (ctime, ctime))
+        set_utime(download_path, created_date)
 
+def set_utime(download_path, created_date):
+    """Set date & time of the file"""
+    ctime = time.mktime(created_date.timetuple())
+    os.utime(download_path, (ctime, ctime))
 
 def download_media(icloud, photo, download_path, size):
     """Download the photo to path, with retries and error handling"""
     logger = setup_logger()
 
+    # get back the directory for the file to be downloaded and create it if not there already
+    download_dir = os.path.dirname(download_path)
+
+    if not os.path.exists(download_dir):
+        try:
+            os.makedirs(download_dir)
+        except OSError:  # pragma: no cover
+            pass         # pragma: no cover
+
     for retries in range(constants.MAX_RETRIES):
         try:
             photo_response = photo.download(size)
             if photo_response:
-                with open(download_path, "wb") as file_obj:
+                temp_download_path = download_path + ".part"
+                with open(temp_download_path, "wb") as file_obj:
                     for chunk in photo_response.iter_content(chunk_size=1024):
                         if chunk:
                             file_obj.write(chunk)
+                os.rename(temp_download_path, download_path)
                 update_mtime(photo, download_path)
                 return True
 
@@ -64,12 +78,14 @@ def download_media(icloud, photo, download_path, size):
 
                 icloud.authenticate()
             else:
+                # you end up here when p.e. throttleing by Apple happens
+                wait_time = (retries + 1) * constants.WAIT_SECONDS
                 logger.tqdm_write(
                     "Error downloading %s, retrying after %d seconds..."
-                    % (photo.filename, constants.WAIT_SECONDS),
+                    % (photo.filename, wait_time),
                     logging.ERROR,
                 )
-                time.sleep(constants.WAIT_SECONDS)
+                time.sleep(wait_time)
 
         except IOError:
             logger.error(
