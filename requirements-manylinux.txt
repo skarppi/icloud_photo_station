@@ -1,1 +1,1 @@
-backports.zoneinfo==0.1.0
+backports.zoneinfo==0.2.1
