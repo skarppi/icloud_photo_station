@@ -33,7 +33,7 @@ Manually install the spk in your DSM `Package Station`. After installation is co
         --password '<YOUR ICLOUD PASSWORD>' \
         --auto-delete \
         --until-found 10 \
-        --download output
+        --directory ./output/
 ```
 
 If your iCloud account has two-factor authentication enabled, SSH to Synology box and run the script manually first time in order to input the verification code. This step needs to be repeated every once in a while when the authentication expires.
