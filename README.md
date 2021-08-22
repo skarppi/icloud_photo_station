@@ -8,9 +8,9 @@
 
 Ready made packages are available:
 
-- For DSM 6.x [icloud_photo_station-0.2.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/0.2.0/icloud_photo_station-0.2.0.spk)
+- For DSM 7.x [icloud_photo_station-0.3.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/v0.3.0/icloud_photo_station-0.3.0.spk)
 
-- For DSM 7.x [icloud_photo_station-0.3.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/0.3.0/icloud_photo_station-0.3.0.spk)
+- For DSM 6.x [icloud_photo_station-0.2.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/0.2.0/icloud_photo_station-0.2.0.spk)
 
 - Or follow instructions below how to package SPK yourself from code. Use ```dsm6``` branch for DSM 6.x.
 
