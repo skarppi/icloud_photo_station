@@ -35,10 +35,7 @@ setup() {
 create_package_tgz() {
 	# Install virtual env and all libraries
 	tar xvfz _${VIRTUALENV} -C $TGZ_DIR
-	python3 -m pip download --dest=${TGZ_DIR}/wheelhouse icloudpd --platform=manylinux1_x86_64 --implementation cp --python-version 3.8 --only-binary=:all:
-
-	# Platform specific libraries
-	python3 -m pip download --dest=${TGZ_DIR}/wheelhouse/ -r ../requirements-manylinux.txt --platform=manylinux1_x86_64 --implementation cp --python-version 3.8 --only-binary=:all:
+	python3 -m pip download --dest=${TGZ_DIR}/wheelhouse icloudpd --platform=manylinux1_x86_64 --implementation cp --only-binary=:all:
 
 	# ### create package.tgz $1: source_dir $2: dest_dir
 	pkg_make_package $TGZ_DIR "${PKG_DIR}"

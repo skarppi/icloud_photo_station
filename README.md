@@ -10,7 +10,7 @@ Helper scripts to repackage [iCloud Photos Downloader](https://github.com/icloud
 
 Ready made package is available:
 
-- icloudpd-1.17.3 [icloud_photo_station-0.4.0.spk](https://github.com/skarppi/icloud_photo_station/releases/download/v0.4.0/icloud_photo_station-0.4.0.spk)
+- icloudpd-1.17.3 [icloud_photo_station-0.4.1.spk](https://github.com/skarppi/icloud_photo_station/releases/download/v0.4.1/icloud_photo_station-0.4.1.spk)
 
 - Or follow instructions below how to package SPK yourself from code with the latest available icloudpd library
 
