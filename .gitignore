@@ -1,9 +1,9 @@
 .DS_Store
 build/
 dist/
+wheelhouse/
 icloudpd.egg-info
-cron_script.sh
-Photos/
+tests/fixtures/**
 .vscode
 __pycache__
 .pytest_cache
@@ -13,6 +13,11 @@ __pycache__
 .coverage
 .coverage.*
 htmlcov
-icloudpd-latest-py2.py3-none-any.whl
+*.whl
 .venv
 venv
+*.spec
+# exclude since there is no js development, just for local testing npm packaging
+node_modules/
+/package.json
+/package-lock.json

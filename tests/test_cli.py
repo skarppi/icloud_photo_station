@@ -7,6 +7,9 @@ import pytest
 from click.testing import CliRunner
 from icloudpd.base import main
 import inspect
+import glob
+
+from tests.helpers import path_from_project_root, print_result_exception, recreate_path
 
 vcr = VCR(decode_compressed_response=True)
 
@@ -15,6 +18,9 @@ class CliTestCase(TestCase):
     @pytest.fixture(autouse=True)
     def inject_fixtures(self, caplog):
         self._caplog = caplog
+        self.root_path = path_from_project_root(__file__)
+        self.fixtures_path = os.path.join(self.root_path, "fixtures")
+        self.vcr_path = os.path.join(self.root_path, "vcr_cassettes")
 
     def test_cli(self):
         runner = CliRunner()
@@ -22,9 +28,12 @@ class CliTestCase(TestCase):
         assert result.exit_code == 0
 
     def test_log_levels(self):
-        base_dir = os.path.normpath(f"tests/fixtures/Photos/{inspect.stack()[0][3]}")
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+        cookie_dir = os.path.join(base_dir, "cookie")
+        data_dir = os.path.join(base_dir, "data")
+
+        for dir in [base_dir, cookie_dir, data_dir]:
+            recreate_path(dir)
 
         parameters = [
             ("debug", ["DEBUG", "INFO"], []),
@@ -33,7 +42,8 @@ class CliTestCase(TestCase):
         ]
         for log_level, expected, not_expected in parameters:
             self._caplog.clear()
-            with vcr.use_cassette("tests/vcr_cassettes/listing_photos.yml"):
+            recreate_path(cookie_dir)
+            with vcr.use_cassette(os.path.join(self.vcr_path, "listing_photos.yml")):
                 # Pass fixed client ID via environment variable
                 runner = CliRunner(env={
                     "CLIENT_ID": "DE309E26-942E-11E8-92F5-14109FE0B321"
@@ -50,7 +60,9 @@ class CliTestCase(TestCase):
                         "--log-level",
                         log_level,
                         "-d",
-                        base_dir,
+                        data_dir,
+                        "--cookie-directory",
+                        cookie_dir,
                     ],
                 )
                 assert result.exit_code == 0
@@ -59,12 +71,19 @@ class CliTestCase(TestCase):
             for text in not_expected:
                 self.assertNotIn(text, self._caplog.text)
 
-    def test_tqdm(self):
-        base_dir = os.path.normpath(f"tests/fixtures/Photos/{inspect.stack()[0][3]}")
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
+        files_in_result = glob.glob(os.path.join(data_dir, "**/*.*"), recursive=True)
 
-        with vcr.use_cassette("tests/vcr_cassettes/listing_photos.yml"):
+        assert sum(1 for _ in files_in_result) == 0
+
+    def test_tqdm(self):
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+        cookie_dir = os.path.join(base_dir, "cookie")
+        data_dir = os.path.join(base_dir, "data")
+
+        for dir in [base_dir, cookie_dir, data_dir]:
+            recreate_path(dir)
+
+        with vcr.use_cassette(os.path.join(self.vcr_path, "listing_photos.yml")):
             # Force tqdm progress bar via ENV var
             runner = CliRunner(env={
                 "FORCE_TQDM": "yes",
@@ -80,13 +99,28 @@ class CliTestCase(TestCase):
                     "--recent",
                     "0",
                     "-d",
-                    base_dir,
+                    data_dir,
+                    "--cookie-directory",
+                    cookie_dir,
                 ],
             )
+            print_result_exception(result)
+
             assert result.exit_code == 0
 
+        files_in_result = glob.glob(os.path.join(data_dir, "**/*.*"), recursive=True)
+
+        assert sum(1 for _ in files_in_result) == 0
+
     def test_unicode_directory(self):
-        with vcr.use_cassette("tests/vcr_cassettes/listing_photos.yml"):
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+        cookie_dir = os.path.join(base_dir, "cookie")
+        data_dir = os.path.join(base_dir, "data")
+
+        for dir in [base_dir, cookie_dir, data_dir]:
+            recreate_path(dir)
+
+        with vcr.use_cassette(os.path.join(self.vcr_path, "listing_photos.yml")):
             # Pass fixed client ID via environment variable
             runner = CliRunner(env={
                 "CLIENT_ID": "DE309E26-942E-11E8-92F5-14109FE0B321"
@@ -103,13 +137,20 @@ class CliTestCase(TestCase):
                     "--log-level",
                     "info",
                     "-d",
-                    "tests/fixtures/相片",
+                    data_dir,
+                    "--cookie-directory",
+                    cookie_dir,
                 ],
             )
             assert result.exit_code == 0
 
+        files_in_result = glob.glob(os.path.join(data_dir, "**/*.*"), recursive=True)
+
+        assert sum(1 for _ in files_in_result) == 0
+
     def test_missing_directory(self):
-        base_dir = os.path.normpath(f"tests/fixtures/Photos/{inspect.stack()[0][3]}")
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+        # need path removed
         if os.path.exists(base_dir):
             shutil.rmtree(base_dir)
 
@@ -131,6 +172,10 @@ class CliTestCase(TestCase):
         )
         assert result.exit_code == 2
 
+        files_in_result = glob.glob(os.path.join(base_dir, "**/*.*"), recursive=True)
+
+        assert sum(1 for _ in files_in_result) == 0
+
     def test_missing_directory_param(self):
         runner = CliRunner()
         result = runner.invoke(
@@ -144,6 +189,23 @@ class CliTestCase(TestCase):
                 "0",
                 "--log-level",
                 "info",
+            ],
+        )
+        assert result.exit_code == 2
+
+    def test_conflict_options_delete_after_download_and_auto_delete(self):
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "--username",
+                "jdoe@gmail.com",
+                "--password",
+                "password1",
+                "-d",
+                "/tmp",
+                "--delete-after-download",
+                "--auto-delete"
             ],
         )
         assert result.exit_code == 2

@@ -1,38 +1,26 @@
-# This image is mainly used for development and testing
-
-FROM python:3.9 as base
-
+FROM alpine:3.18 as runtime_amd64_none
 WORKDIR /app
-# explicit requirements because runtime does not need ALL dependencies
-COPY requirements-pip.txt .
-COPY requirements.txt .
-RUN pip3 install -r requirements-pip.txt
-RUN pip3 install -r requirements.txt
+COPY dist/icloudpd-ex-*.*.*-linux-amd64 icloudpd_ex
 
-FROM base as common
-RUN apt-get update && apt-get install -y dos2unix
-RUN mkdir Photos
-COPY requirements*.txt ./
-COPY scripts/install_deps scripts/install_deps
-RUN dos2unix scripts/install_deps
-RUN scripts/install_deps
-COPY . .
-RUN dos2unix scripts/*
-ENV TZ="America/Los_Angeles"
+FROM alpine:3.18 as runtime_386_none
+WORKDIR /app
+COPY dist/icloudpd-ex-*.*.*-linux-386 icloudpd_ex
 
-FROM common as test
+FROM alpine:3.18 as runtime_arm64_none
+WORKDIR /app
+COPY dist/icloudpd-ex-*.*.*-linux-arm64 icloudpd_ex
 
-RUN scripts/test
-RUN scripts/lint
+FROM alpine:3.18 as runtime_arm_v7
+WORKDIR /app
+COPY dist/icloudpd-ex-*.*.*-linux-arm32v7 icloudpd_ex
 
-FROM common as build
+FROM alpine:3.18 as runtime_arm_v6
+WORKDIR /app
+COPY dist/icloudpd-ex-*.*.*-linux-arm32v6 icloudpd_ex
 
-RUN scripts/build
-
-FROM python:3.9-alpine as runtime
-
-COPY --from=build /app/dist/* /tmp
-RUN pip3 install /tmp/*.whl
-
-# copy from test to ensure test stage runs before runtime stage in buildx
-COPY --from=test /app/.coverage .
+FROM runtime_${TARGETARCH}_${TARGETVARIANT:-none} as runtime
+RUN apk add --no-cache tzdata
+ENV TZ=UTC
+WORKDIR /app
+RUN chmod +x /app/icloudpd_ex
+ENTRYPOINT ["/app/icloudpd_ex"]

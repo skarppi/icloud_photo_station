@@ -3,7 +3,6 @@ build/
 htmlcov/
 icloudpd.egg-info
 cron_script.sh
-Photos/
 .vscode
 **/__pycache__
 .pytest_cache/
@@ -13,8 +12,7 @@ Photos/
 .coverage
 .coverage.*
 .git
-tests/fixtures/Photos
-tests/fixtures/中文
+tests/
 .venv
 venv
 create/
