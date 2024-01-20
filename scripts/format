@@ -1,4 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-echo "Running autopep8..."
-autopep8 -r --in-place --aggressive --aggressive src/ --exclude src/pyicloud_ipd
