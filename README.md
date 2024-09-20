@@ -24,23 +24,25 @@ Ready made package is available:
     sh build.sh
 ```
 
-Manually install the spk in your DSM `Package Station`. After installation is complete you can set up `User-defined script` into `Task Scheduler` and set up scheduling. Notification emails for script output are handy to get notified when two-factor authentication has expired.
+Manually install the spk in your DSM `Package Station`. After installation is complete you can set up `User-defined script` into `Task Scheduler` and set up scheduling. Notification emails for script output are handy to get notified if there are any problems.
 
 ```
     # temporary fix for permissions denied errors
     # https://github.com/icloud-photos-downloader/icloud_photos_downloader/issues/764
-    sudo mount /tmp -o remount,exec
+    export TMPDIR=$HOME/tmp
 
     source /volume1/@appstore/icloud_photo_station/env/bin/activate
     icloudpd \
         --username '<YOUR ICLOUD USERNAME>' \
-        --password '<YOUR ICLOUD PASSWORD>' \
+        --password-provider keyring \
+        --password-provider webui \
+        --mfa-provider webui
         --auto-delete \
         --until-found 10 \
         --directory ./output/
 ```
 
-If your iCloud account has two-factor authentication enabled, SSH to Synology box and run the script manually first time in order to input the verification code. This step needs to be repeated every once in a while when the authentication expires.
+Open WebUI at http://synology.local:8080 to input your password and two-factor authentication verification code when it's expired.
 
 ## Everything else
 
